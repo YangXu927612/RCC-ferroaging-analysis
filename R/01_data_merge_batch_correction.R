@@ -1,8 +1,18 @@
 # ==============================================================================
 # 01_data_merge_batch_correction.R
-# Merge multiple expression matrices and remove batch effects using limma
-# Output: Boxplots + advanced PCA plots (with ellipses) + per-sample PCA scores.
-# All outputs are written to a timestamped sub-directory.
+# Merge the TRAINING expression matrices (GSE40435 + GSE66272) and remove
+# batch effects using limma::removeBatchEffect.
+#
+# IMPORTANT — DATA-LEAKAGE SAFETY:
+#   The training-cohort file names are listed EXPLICITLY in `input_files`
+#   (GSE40435.csv, GSE66272.csv). The script does NOT use list.files() so
+#   that an external validation CSV (e.g. GSE53757.csv) sitting in the same
+#   working directory CANNOT be merged into the training matrix by accident.
+#   If GSE53757.csv is present in the working directory the script emits a
+#   warning, but it is still ignored.
+#
+# Output: Boxplots + advanced PCA plots (with ellipses) + per-sample PCA
+# scores, all written to a timestamped sub-directory.
 # ==============================================================================
 
 library(patchwork)
@@ -24,10 +34,47 @@ output_dir <- file.path(data_path, out_dirname)
 if(!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 cat("All outputs will be saved to: ", output_dir, "\n")
 
-# 2. 读取&合并表达数据（CSV格式）
-file_list <- list.files(data_path, pattern = "\\.csv$", full.names = TRUE)
-if (length(file_list) == 0) stop("未找到任何csv文件！")
-cat("读取到以下文件:\n")
+# ---------------------------------------------------------------------------
+# 1b. TRAINING-COORT INPUT FILES (explicit; do NOT use list.files() here).
+#
+# This script MUST only read the two training cohorts (GSE40435, GSE66272).
+# The external validation cohort GSE53757.csv is consumed exclusively by
+# 08_external_validation.R. Reading it through list.files() here would merge
+# the validation samples into the training matrix and create data leakage.
+#
+# If you need to change the cohorts, edit the vector below. Only files
+# listed here will be read — any other *.csv files in the working directory
+# are explicitly ignored.
+# ---------------------------------------------------------------------------
+input_files <- c(
+  "GSE40435.csv",
+  "GSE66272.csv"
+)
+file_list <- file.path(data_path, input_files)
+
+# Defensive check: refuse to run if any required training file is missing.
+missing_inputs <- input_files[!file.exists(file_list)]
+if (length(missing_inputs) > 0) {
+  stop(
+    "Missing required training input CSV(s) in the working directory:\n  ",
+    paste(missing_inputs, collapse = "\n  "),
+    "\nPlace them next to this script (or wherever you set getwd()) before running."
+  )
+}
+
+# Defensive check: explicitly warn if the external-validation CSV is present
+# in the same directory. It will NOT be read below, but having it in the
+# working directory is a common foot-gun, so we surface a loud reminder.
+if (file.exists(file.path(data_path, "GSE53757.csv"))) {
+  warning(
+    "GSE53757.csv is present in the working directory. ",
+    "This is the EXTERNAL VALIDATION cohort. It will be IGNORED by this ",
+    "script and is consumed only by 08_external_validation.R. ",
+    "Do not move its rows into the training merged matrix."
+  )
+}
+
+cat("Reading the following training cohort CSV(s):\n")
 print(file_list)
 data_list <- lapply(file_list, function(f){
   dt <- fread(f)
